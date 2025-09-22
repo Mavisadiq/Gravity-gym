@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GRAVITY ELITE FITNESS STUDIO</title>
+    <!-- Use the Inter font from Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Load Tailwind CSS from CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+
+        /* Custom styles to prevent layout shift with fixed header */
+        #hero-section {
+            padding-top: 120px;
+        }
+
+        /* For the main content container to handle view switching */
+        #content-container {
+            min-height: calc(100vh - 188px);
+        }
+    </style>
+    <!-- Firebase JS SDK -->
+    <script type="module">
+        import {
+            initializeApp
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import {
+            getAuth,
+            onAuthStateChanged,
+            createUserWithEmailAndPassword,
+            signInWithEmailAndPassword,
+            signOut
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import {
+            getFirestore,
+            collection,
+            addDoc,
+            query,
+            orderBy,
+            onSnapshot,
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase Global Variables
+        const appId = "1:1013327226199:web:b10aa59075978cec43ca12";
+        const firebaseConfig = {
+            apiKey: "AIzaSyCvxb4a3cwk8Din-Lhh0YGtqJ40ked3r7E",
+            authDomain: "gym-website-446d1.firebaseapp.com",
+            projectId: "gym-website-446d1",
+            storageBucket: "gym-website-446d1.firebasestorage.app",
+            messagingSenderId: "1013327226199",
+            appId: "1:1013327226199:web:b10aa59075978cec43ca12"
+        };
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        let db;
+        let auth;
+        let userId = null;
+        let isAuthReady = false;
+
+        window.addEventListener('DOMContentLoaded', async () => {
+            if (Object.keys(firebaseConfig).length > 0) {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                // No automatic sign-in, the page starts logged out
+                updateNavigation(false);
+                renderView('home');
+
+                setupAuthListener();
+            } else {
+                console.error("Firebase config is not available.");
+                renderView('home');
+            }
+        });
+
+        function setupAuthListener() {
+            onAuthStateChanged(auth, (user) => {
+                isAuthReady = true;
+                const isAuthenticated = user && !user.isAnonymous;
+                updateNavigation(isAuthenticated);
+
+                if (isAuthenticated) {
+                    userId = user.uid;
+                    console.log('User authenticated:', userId);
+                    // Automatically redirect to dashboard after successful login/signup
+                    if (window.currentView === 'login' || window.currentView === 'signup') {
+                        renderView('dashboard');
+                    }
+                } else {
+                    userId = null;
+                    if (window.currentView === 'dashboard') {
+                        renderView('home');
+                    }
+                }
+            });
+        }
+
+        function updateNavigation(isAuthenticated) {
+            const nav = document.querySelector('nav');
+            const memberPortalBtn = nav.querySelector('#member-portal-btn');
+            const authBtns = nav.querySelector('#auth-btns');
+            
+            if (isAuthenticated) {
+                if (authBtns) authBtns.classList.add('hidden');
+                if (memberPortalBtn) memberPortalBtn.classList.remove('hidden');
+            } else {
+                if (authBtns) authBtns.classList.remove('hidden');
+                if (memberPortalBtn) memberPortalBtn.classList.add('hidden');
+            }
+        }
+
+        window.renderView = function (view) {
+            window.currentView = view;
+            const contentContainer = document.getElementById('content-container');
+            if (!contentContainer) return;
+
+            switch (view) {
+                case 'home':
+                    contentContainer.innerHTML = document.getElementById('home-template').innerHTML;
+                    setupHomeLinks();
+                    break;
+                case 'dashboard':
+                    if (!isAuthReady || !auth.currentUser || auth.currentUser.isAnonymous) {
+                        contentContainer.innerHTML = `
+                            <div class="text-center py-20">
+                                <h2 class="text-4xl font-bold text-white mb-4">You must be logged in to view the dashboard.</h2>
+                                <p class="text-lg text-gray-400">Please <a href="#" onclick="renderView('login')" class="text-teal-400 hover:underline">log in</a> or <a href="#" onclick="renderView('signup')" class="text-teal-400 hover:underline">sign up</a>.</p>
+                            </div>
+                        `;
+                        return;
+                    }
+                    contentContainer.innerHTML = document.getElementById('dashboard-template').innerHTML;
+                    document.getElementById('user-id-display').textContent = userId;
+                    setupDashboardFeatures();
+                    break;
+                case 'login':
+                    contentContainer.innerHTML = document.getElementById('login-template').innerHTML;
+                    document.getElementById('login-form').addEventListener('submit', handleLogin);
+                    break;
+                case 'signup':
+                    contentContainer.innerHTML = document.getElementById('signup-template').innerHTML;
+                    document.getElementById('signup-form').addEventListener('submit', handleSignup);
+                    break;
+                default:
+                    renderView('home');
+            }
+        };
+
+        function setupHomeLinks() {
+            document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+                anchor.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    document.querySelector(this.getAttribute('href')).scrollIntoView({
+                        behavior: 'smooth'
+                    });
+                });
+            });
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const email = e.target.email.value;
+            const password = e.target.password.value;
+            if (!email || !password) {
+                showMessage("Please enter both email and password.", 'error');
+                return;
+            }
+            try {
+                await signInWithEmailAndPassword(auth, email, password);
+                showMessage("Login successful!", 'success');
+            } catch (error) {
+                showMessage(`Login failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function handleSignup(e) {
+            e.preventDefault();
+            const email = e.target.email.value;
+            const password = e.target.password.value;
+            if (!email || !password) {
+                showMessage("Please enter both email and password.", 'error');
+                return;
+            }
+            try {
+                await createUserWithEmailAndPassword(auth, email, password);
+                showMessage("Account created successfully! You are now logged in.", 'success');
+            } catch (error) {
+                let errorMessage = `Signup failed: ${error.message}`;
+                if (error.code === 'auth/weak-password') {
+                    errorMessage = "Signup failed: The password is too weak. Please use a stronger password.";
+                } else if (error.code === 'auth/operation-not-allowed') {
+                    errorMessage = "Signup failed: Email/Password sign-in is not enabled in Firebase. Please enable it in your Firebase project settings.";
+                }
+                showMessage(errorMessage, 'error');
+            }
+        }
+
+        window.handleLogout = async function() {
+            try {
+                await signOut(auth);
+                showMessage("You have been logged out.", 'success');
+            } catch (error) {
+                showMessage(`Logout failed: ${error.message}`, 'error');
+            }
+        }
+
+        function showMessage(message, type = 'info') {
+            const container = document.getElementById('message-container');
+            if (!container) return;
+            const bgColor = type === 'success' ? 'bg-green-500' : 'bg-red-500';
+            container.innerHTML = `
+                <div class="fixed top-24 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 rounded-xl text-white font-bold shadow-lg ${bgColor} animate-fade-in-down transition-opacity duration-300">
+                    ${message}
+                </div>
+            `;
+            setTimeout(() => {
+                container.innerHTML = '';
+            }, 5000);
+        }
+
+        function setupDashboardFeatures() {
+            // Workout Logging
+            const workoutForm = document.getElementById('workout-form');
+            if (workoutForm) {
+                workoutForm.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const exercise = e.target.exercise.value;
+                    const sets = e.target.sets.value;
+                    const reps = e.target.reps.value;
+                    const weight = e.target.weight.value;
+                    if (!exercise || !sets || !reps) return;
+                    try {
+                        const userWorkoutsCollection = collection(db, `artifacts/${appId}/users/${userId}/workouts`);
+                        await addDoc(userWorkoutsCollection, {
+                            exercise,
+                            sets: Number(sets),
+                            reps: Number(reps),
+                            weight: Number(weight),
+                            timestamp: Date.now()
+                        });
+                        e.target.reset();
+                    } catch (e) {
+                        console.error("Error adding workout: ", e);
+                    }
+                });
+            }
+
+            // Real-time Workout List
+            const workoutsList = document.getElementById('workouts-list');
+            if (workoutsList) {
+                const userWorkoutsCollection = collection(db, `artifacts/${appId}/users/${userId}/workouts`);
+                const q = query(userWorkoutsCollection, orderBy("timestamp", "desc"));
+                onSnapshot(q, (snapshot) => {
+                    workoutsList.innerHTML = '';
+                    snapshot.forEach((doc) => {
+                        const data = doc.data();
+                        const li = document.createElement('li');
+                        li.className = 'bg-gray-700 p-4 rounded-lg flex justify-between items-center';
+                        li.innerHTML = `
+                            <div>
+                                <h4 class="font-bold text-white">${data.exercise}</h4>
+                                <p class="text-sm text-gray-400">Sets: ${data.sets}, Reps: ${data.reps}, Weight: ${data.weight}kg</p>
+                            </div>
+                        `;
+                        workoutsList.appendChild(li);
+                    });
+                });
+            }
+
+            // Community Chat
+            const communityForm = document.getElementById('community-form');
+            if (communityForm) {
+                communityForm.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const message = e.target.message.value;
+                    if (!message) return;
+                    if (!auth.currentUser || auth.currentUser.isAnonymous) {
+                        showMessage("You must be logged in to send messages.", 'error');
+                        return;
+                    }
+                    try {
+                        const communityCollection = collection(db, `artifacts/${appId}/public/data/community-messages`);
+                        await addDoc(communityCollection, {
+                            userId: userId,
+                            message: message,
+                            timestamp: Date.now()
+                        });
+                        e.target.reset();
+                    } catch (e) {
+                        console.error("Error sending message: ", e);
+                    }
+                });
+            }
+
+            // Real-time Community Chat
+            const communityMessages = document.getElementById('community-messages');
+            if (communityMessages) {
+                const communityCollection = collection(db, `artifacts/${appId}/public/data/community-messages`);
+                const q = query(communityCollection, orderBy("timestamp", "asc"));
+                onSnapshot(q, (snapshot) => {
+                    communityMessages.innerHTML = '';
+                    snapshot.forEach((doc) => {
+                        const data = doc.data();
+                        const li = document.createElement('li');
+                        li.className = 'flex items-start space-x-2 p-2 rounded-lg';
+                        li.classList.add(data.userId === userId ? 'bg-teal-500' : 'bg-gray-700');
+                        li.innerHTML = `
+                            <div class="flex-grow">
+                                <span class="font-bold text-sm ${data.userId === userId ? 'text-white' : 'text-teal-400'}">${data.userId.substring(0, 8)}...</span>
+                                <p class="text-gray-200">${data.message}</p>
+                            </div>
+                        `;
+                        communityMessages.appendChild(li);
+                    });
+                    communityMessages.scrollTop = communityMessages.scrollHeight;
+                });
+            }
+        }
+
+        window.toggleMenu = function () {
+            const menu = document.getElementById('mobile-menu');
+            menu.classList.toggle('hidden');
+        };
+    </script>
+</head>
+
+<body class="bg-gray-900 text-gray-200">
+    <div id="message-container"></div>
+    <!-- Header & Navigation -->
+    <header class="fixed top-0 left-0 right-0 z-50 bg-gray-900 bg-opacity-80 backdrop-blur-sm shadow-lg">
+        <nav class="container mx-auto px-6 py-4 flex justify-between items-center">
+            <a href="#" class="text-3xl font-bold text-teal-400" onclick="renderView('home')">
+                GRAVITY<span class="text-white">ELITE</span>
+            </a>
+            <div class="hidden md:flex items-center space-x-6 text-lg font-medium">
+                <a href="#features" class="hover:text-teal-400 transition-colors duration-300">Features</a>
+                <a href="#pricing" class="hover:text-teal-400 transition-colors duration-300">Pricing</a>
+                <a href="#contact" class="hover:text-teal-400 transition-colors duration-300">Contact</a>
+                <div id="auth-btns">
+                    <button onclick="renderView('login')"
+                        class="px-4 py-2 bg-gray-700 text-white rounded-full shadow-lg hover:bg-gray-600 transition-colors duration-300">
+                        Log In
+                    </button>
+                    <button onclick="renderView('signup')"
+                        class="px-4 py-2 bg-teal-500 text-white rounded-full shadow-lg hover:bg-teal-400 transition-colors duration-300">
+                        Sign Up
+                    </button>
+                </div>
+                <div id="member-portal-btn" class="hidden">
+                    <button onclick="renderView('dashboard')"
+                        class="px-4 py-2 bg-teal-500 text-white rounded-full shadow-lg hover:bg-teal-400 transition-colors duration-300">
+                        Member Portal
+                    </button>
+                    <button onclick="handleLogout()"
+                        class="px-4 py-2 bg-gray-700 text-white rounded-full shadow-lg hover:bg-gray-600 transition-colors duration-300">
+                        Log Out
+                    </button>
+                </div>
+            </div>
+            <!-- Mobile Menu Button -->
+            <button class="md:hidden text-gray-200 focus:outline-none" onclick="toggleMenu()">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24"
+                    stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+            </button>
+        </nav>
+        <!-- Mobile Menu -->
+        <div id="mobile-menu"
+            class="md:hidden hidden bg-gray-800 text-center py-4 space-y-4 font-medium transition-all duration-300 ease-in-out">
+            <a href="#features" class="block py-2 hover:text-teal-400" onclick="toggleMenu()">Features</a>
+            <a href="#pricing" class="block py-2 hover:text-teal-400" onclick="toggleMenu()">Pricing</a>
+            <a href="#contact" class="block py-2 hover:text-teal-400" onclick="toggleMenu()">Contact</a>
+            <div id="mobile-auth-btns">
+                <button onclick="renderView('login')"
+                    class="block w-full py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors duration-300">
+                    Log In
+                </button>
+                <button onclick="renderView('signup')"
+                    class="block w-full py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-400 transition-colors duration-300">
+                    Sign Up
+                </button>
+            </div>
+            <div id="mobile-member-portal-btn" class="hidden">
+                <button onclick="renderView('dashboard')"
+                    class="block w-full py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-400 transition-colors duration-300">
+                    Member Portal
+                </button>
+                <button onclick="handleLogout()"
+                    class="block w-full py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors duration-300">
+                    Log Out
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="mt-24">
+        <!-- Main Content Container -->
+        <div id="content-container" class="transition-opacity duration-500">
+            <!-- Content will be rendered here by JavaScript -->
+        </div>
+
+        <!-- Initial Loader -->
+        <div id="loader" class="fixed inset-0 bg-gray-900 bg-opacity-70 backdrop-blur-sm z-50 flex items-center justify-center">
+            <div class="text-center">
+                <div class="w-16 h-16 border-4 border-dashed rounded-full animate-spin border-teal-500 mx-auto"></div>
+                <p class="mt-4 text-white text-lg">Initializing your session...</p>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-gray-800 py-8 px-4 text-center text-gray-400">
+        <p>&copy; 2023 GRAVITY ELITE FITNESS STUDIO. All Rights Reserved.</p>
+    </footer>
+
+    <!-- Templates for different views -->
+    <template id="home-template">
+        <!-- Hero Section -->
+        <section id="hero-section"
+            class="relative overflow-hidden bg-cover bg-center h-screen flex items-center justify-center text-center px-4"
+            style="background-image: url('https://placehold.co/1920x1080/1a202c/e2e8f0?text=GRAVITY+ELITE+FITNESS+STUDIO')">
+            <div class="absolute inset-0 bg-gray-900 opacity-70"></div>
+            <div class="relative z-10 max-w-4xl mx-auto space-y-6">
+                <h1 class="text-5xl md:text-7xl font-extrabold leading-tight text-white drop-shadow-lg">
+                    Achieve New Heights, Defy Gravity
+                </h1>
+                <p class="text-xl md:text-2xl text-gray-300 font-light drop-shadow-lg">
+                    Join a community dedicated to your fitness journey. We provide the tools, you provide the will.
+                </p>
+                <a href="#pricing"
+                    class="inline-block px-8 py-4 bg-teal-500 text-white font-bold text-lg rounded-full shadow-lg hover:bg-teal-400 transform hover:scale-105 transition-transform duration-300">
+                    Join Now
+                </a>
+            </div>
+        </section>
+
+        <!-- Features Section -->
+        <section id="features" class="py-20 px-4">
+            <div class="container mx-auto">
+                <h2 class="text-4xl md:text-5xl font-bold text-center mb-16 text-white">Why Choose Us?</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-10">
+                    <!-- Feature Card 1 -->
+                    <div class="bg-gray-800 p-8 rounded-xl shadow-lg hover:shadow-2xl transition-shadow duration-300">
+                        <div class="flex items-center justify-center w-16 h-16 bg-teal-500 rounded-full mb-6 mx-auto">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-white" fill="none"
+                                viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.5 3-9s-1.343-9-3-9m0 18a9 9 0 01-9-9m9 9c-1.657 0-3-4.5-3-9s1.343-9 3-9m-9 9h6" />
+                            </svg>
+                        </div>
+                        <h3 class="text-2xl font-semibold text-white text-center mb-4">State-of-the-Art Equipment</h3>
+                        <p class="text-center text-gray-400">
+                            Train on the latest cardio machines, strength equipment, and functional training gear from
+                            leading brands.
+                        </p>
+                    </div>
+                    <!-- Feature Card 2 -->
+                    <div class="bg-gray-800 p-8 rounded-xl shadow-lg hover:shadow-2xl transition-shadow duration-300">
+                        <div class="flex items-center justify-center w-16 h-16 bg-teal-500 rounded-full mb-6 mx-auto">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-white" fill="none"
+                                viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H2v-2a3 3 0 015.356-1.857M17 20v-2c0-.523-.199-1.033-.56-1.414m-12.637-6.023a3.001 3.001 0 00-3.238-1.503M12 21l-3-3m3 3l3-3m-3 3v-2.293a4 4 0 00-1.172-2.828L7 11" />
+                            </svg>
+                        </div>
+                        <h3 class="text-2xl font-semibold text-white text-center mb-4">Expert Trainers</h3>
+                        <p class="text-center text-gray-400">
+                            Our certified trainers are passionate about helping you achieve your goals with personalized
+                            plans and guidance.
+                        </p>
+                    </div>
+                    <!-- Feature Card 3 -->
+                    <div class="bg-gray-800 p-8 rounded-xl shadow-lg hover:shadow-2xl transition-shadow duration-300">
+                        <div class="flex items-center justify-center w-16 h-16 bg-teal-500 rounded-full mb-6 mx-auto">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-white" fill="none"
+                                viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M12 4.354a4 4 0 110 5.292M12 4.354a4 4 0 100 5.292M12 4.354v.231m0 5.061v.231m0 0a4 4 0 110 5.292m0 0a4 4 0 100 5.292m0 0v.231m0 5.061v.231" />
+                            </svg>
+                        </div>
+                        <h3 class="text-2xl font-semibold text-white text-center mb-4">Supportive Community</h3>
+                        <p class="text-center text-gray-400">
+                            Find your fit in a positive and welcoming environment where everyone is motivated to succeed.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Pricing Section -->
+        <section id="pricing" class="py-20 px-4 bg-gray-900">
+            <div class="container mx-auto">
+                <h2 class="text-4xl md:text-5xl font-bold text-center mb-16 text-white">Membership Plans</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-10 max-w-5xl mx-auto">
+                    <!-- Basic Plan -->
+                    <div class="bg-gray-800 p-8 rounded-xl shadow-lg text-center transform hover:scale-105 transition-transform duration-300">
+                        <h3 class="text-3xl font-bold text-white mb-4">Basic</h3>
+                        <p class="text-5xl font-extrabold text-teal-400 mb-6">$35<span class="text-xl text-gray-400">/month</span></p>
+                        <ul class="text-left text-gray-300 space-y-3 mb-8">
+                            <li class="flex items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-green-400"
+                                    viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd"
+                                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                        clip-rule="evenodd" />
+                                </svg>
+                                <span>Access to all standard gym facilities</span>
+                            </li>
+                            <li class="flex items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-green-400"
+                                    viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd"
+                                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                        clip-rule="evenodd" />
+                                </svg>
+                                <span>Locker room access</span>
+                            </li>
+                            <li class="flex items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-red-400"
+                                    viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd"
+                                        d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                                        clip-rule="evenodd" />
+                                </svg>
+                                <span>No guest passes</span>
+                            </li>
+                        </ul>
+                        <button class="w-full py-3 bg-teal-500 text-white font-bold rounded-full shadow-lg hover:bg-teal-400 transition-colors duration-300">
+                            Select Plan
+                        </button>
+                    </div>
+
+                    <!-- Pro Plan -->
+                    <div class="bg-gray-700 p-8 rounded-xl shadow-2xl text-center transform scale-105 border-2 border-teal-500 relative">
+                        <div class="absolute top-0 right-0 mt-4 mr-4 bg-teal-500 text-white px-3 py-1 rounded-full text-sm font-bold">
+                            Most Popular
+                        </div>
+                        <h3 class="text-3xl font-bold text-white mb-4">Pro</h3>
+                        <p class="text-5xl font-extrabold text-teal-400 mb-6">$60<span class="text-xl text-gray-400">/month</span></p>
+                        <ul class="text-left text-gray-300 space-y-3 mb-8">
+                            <li class="flex items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-green-400"
+                                    viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd"
+                                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                        clip-rule="evenodd" />
+                                </svg>
+                                <span>Everything in Basic</span>
+                            </li>
+                            <li class="flex items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-green-400"
+                                    viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd"
+                                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                        clip-rule="evenodd" />
+                                </svg>
+                                <span>Unlimited group classes</span>
+                            </li>
+                            <li class="flex items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-green-400"
+                                    viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd"
+                                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                        clip-rule="evenodd" />
+                                </svg>
+                                <span>1 free personal training session</span>
+                            </li>
+                        </ul>
+                        <button class="w-full py-3 bg-teal-500 text-white font-bold rounded-full shadow-lg hover:bg-teal-400 transition-colors duration-300">
+                            Select Plan
+                        </button>
+                    </div>
+
+                    <!-- Elite Plan -->
+                    <div class="bg-gray-800 p-8 rounded-xl shadow-lg text-center transform hover:scale-105 transition-transform duration-300">
+                        <h3 class="text-3xl font-bold text-white mb-4">Elite</h3>
+                        <p class="text-5xl font-extrabold text-teal-400 mb-6">$95<span class="text-xl text-gray-400">/month</span></p>
+                        <ul class="text-left text-gray-300 space-y-3 mb-8">
+                            <li class="flex items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-green-400"
+                                    viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd"
+                                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                        clip-rule="evenodd" />
+                                </svg>
+                                <span>Everything in Pro</span>
+                            </li>
+                            <li class="flex items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-green-400"
+                                    viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd"
+                                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                        clip-rule="evenodd" />
+                                </svg>
+                                <span>Unlimited personal training</span>
+                            </li>
+                            <li class="flex items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-green-400"
+                                    viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd"
+                                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                        clip-rule="evenodd" />
+                                </svg>
+                                <span>Guest passes</span>
+                            </li>
+                        </ul>
+                        <button class="w-full py-3 bg-teal-500 text-white font-bold rounded-full shadow-lg hover:bg-teal-400 transition-colors duration-300">
+                            Select Plan
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Testimonials Section -->
+        <section class="py-20 px-4 bg-gray-800">
+            <div class="container mx-auto">
+                <h2 class="text-4xl md:text-5xl font-bold text-center mb-16 text-white">What Our Members Say</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
+                    <!-- Testimonial 1 -->
+                    <div class="bg-gray-700 p-8 rounded-xl shadow-lg">
+                        <p class="text-xl font-medium text-gray-300 mb-6 italic">
+                            "GRAVITY ELITE FITNESS STUDIO changed my life. The community is so welcoming, and the trainers are
+                            incredibly knowledgeable. I've never felt stronger or more motivated."
+                        </p>
+                        <div class="flex items-center">
+                            <img src="https://placehold.co/60x60/333/fff?text=AJ" alt="Member Photo"
+                                class="w-12 h-12 rounded-full mr-4">
+                            <div>
+                                <h4 class="font-bold text-white">Alex J.</h4>
+                                <p class="text-sm text-gray-400">Long-Term Member</p>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Testimonial 2 -->
+                    <div class="bg-gray-700 p-8 rounded-xl shadow-lg">
+                        <p class="text-xl font-medium text-gray-300 mb-6 italic">
+                            "The equipment here is top-notch, and the facility is always clean. It's the perfect place to
+                            focus on my goals without any distractions."
+                        </p>
+                        <div class="flex items-center">
+                            <img src="https://placehold.co/60x60/333/fff?text=MJ" alt="Member Photo"
+                                class="w-12 h-12 rounded-full mr-4">
+                            <div>
+                                <h4 class="font-bold text-white">Maria P.</h4>
+                                <p class="text-sm text-gray-400">New Member</p>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Testimonial 3 -->
+                    <div class="bg-gray-700 p-8 rounded-xl shadow-lg">
+                        <p class="text-xl font-medium text-gray-300 mb-6 italic">
+                            "I love the supportive atmosphere. Everyone, from the staff to the other members, makes you
+                            feel like you belong. I look forward to my workouts every day."
+                        </p>
+                        <div class="flex items-center">
+                            <img src="https://placehold.co/60x60/333/fff?text=KC" alt="Member Photo"
+                                class="w-12 h-12 rounded-full mr-4">
+                            <div>
+                                <h4 class="font-bold text-white">Ken C.</h4>
+                                <p class="text-sm text-gray-400">Enthusiast</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Contact Section -->
+        <section id="contact" class="py-20 px-4 bg-gray-900">
+            <div class="container mx-auto max-w-2xl text-center">
+                <h2 class="text-4xl md:text-5xl font-bold mb-6 text-white">Get In Touch</h2>
+                <p class="text-xl text-gray-300 mb-12">
+                    Ready to start your fitness journey? Fill out the form below and we'll get back to you.
+                </p>
+                <form class="bg-gray-800 p-8 rounded-xl shadow-lg space-y-6">
+                    <div>
+                        <input type="text" placeholder="Your Name"
+                            class="w-full px-4 py-3 rounded-xl bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500">
+                    </div>
+                    <div>
+                        <input type="email" placeholder="Your Email"
+                            class="w-full px-4 py-3 rounded-xl bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500">
+                    </div>
+                    <div>
+                        <textarea placeholder="Your Message" rows="6"
+                            class="w-full px-4 py-3 rounded-xl bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"></textarea>
+                    </div>
+                    <button type="submit"
+                        class="w-full px-6 py-4 bg-teal-500 text-white font-bold rounded-full shadow-lg hover:bg-teal-400 transition-colors duration-300">
+                        Send Message
+                    </button>
+                </form>
+            </div>
+        </section>
+    </template>
+
+    <template id="dashboard-template">
+        <section class="py-20 px-4 min-h-screen">
+            <div class="container mx-auto max-w-7xl">
+                <div class="text-center mb-12">
+                    <h2 class="text-4xl md:text-5xl font-bold text-white mb-2">Member Portal</h2>
+                    <p class="text-sm text-gray-400 mt-2">Your User ID: <span id="user-id-display" class="font-mono text-teal-400"></span></p>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-10">
+                    <!-- Column 1: Workout Tracking -->
+                    <div class="lg:col-span-2 space-y-10">
+                        <!-- Workout Logger -->
+                        <div class="bg-gray-800 p-8 rounded-xl shadow-lg">
+                            <h3 class="text-2xl font-bold text-white mb-6">Log a New Workout</h3>
+                            <form id="workout-form" class="space-y-4">
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <input type="text" id="exercise" name="exercise" placeholder="Exercise (e.g., Bench Press)"
+                                        class="w-full px-4 py-3 rounded-lg bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500">
+                                    <input type="number" id="sets" name="sets" placeholder="Sets"
+                                        class="w-full px-4 py-3 rounded-lg bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500">
+                                    <input type="number" id="reps" name="reps" placeholder="Reps"
+                                        class="w-full px-4 py-3 rounded-lg bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500">
+                                    <input type="number" id="weight" name="weight" placeholder="Weight (kg)"
+                                        class="w-full px-4 py-3 rounded-lg bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500">
+                                </div>
+                                <button type="submit"
+                                    class="w-full px-6 py-3 bg-teal-500 text-white font-bold rounded-full shadow-lg hover:bg-teal-400 transition-colors duration-300">
+                                    Add Workout
+                                </button>
+                            </form>
+                        </div>
+                        <!-- Workout History -->
+                        <div class="bg-gray-800 p-8 rounded-xl shadow-lg">
+                            <h3 class="text-2xl font-bold text-white mb-6">Workout History</h3>
+                            <ul id="workouts-list" class="space-y-4">
+                                <!-- Workouts will be dynamically loaded here -->
+                                <li class="text-center text-gray-400">No workouts logged yet.</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- Column 2: Training Plan & Community Chat -->
+                    <div class="lg:col-span-1 space-y-10">
+                        <!-- Customized Training Plan -->
+                        <div class="bg-gray-800 p-8 rounded-xl shadow-lg">
+                            <h3 class="text-2xl font-bold text-white mb-6">Your Training Plan</h3>
+                            <div class="prose text-gray-300">
+                                <h4 class="text-xl font-semibold mb-2 text-white">Monday: Push Day</h4>
+                                <ul class="list-disc list-inside">
+                                    <li>Bench Press: 3 sets x 8-10 reps</li>
+                                    <li>Overhead Press: 3 sets x 8-10 reps</li>
+                                    <li>Tricep Dips: 3 sets x 10 reps</li>
+                                </ul>
+                                <h4 class="text-xl font-semibold mt-6 mb-2 text-white">Wednesday: Pull Day</h4>
+                                <ul class="list-disc list-inside">
+                                    <li>Pull-ups: 3 sets to failure</li>
+                                    <li>Bent-over Rows: 3 sets x 8-10 reps</li>
+                                    <li>Bicep Curls: 3 sets x 12 reps</li>
+                                </ul>
+                                <h4 class="text-xl font-semibold mt-6 mb-2 text-white">Friday: Leg Day</h4>
+                                <ul class="list-disc list-inside">
+                                    <li>Squats: 3 sets x 8-10 reps</li>
+                                    <li>Deadlifts: 3 sets x 5 reps</li>
+                                    <li>Calf Raises: 3 sets x 15 reps</li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <!-- Community Board -->
+                        <div class="bg-gray-800 p-8 rounded-xl shadow-lg flex flex-col h-[400px]">
+                            <h3 class="text-2xl font-bold text-white mb-4">Community Board</h3>
+                            <ul id="community-messages" class="flex-grow overflow-y-auto space-y-2 mb-4 p-2 bg-gray-700 rounded-lg">
+                                <!-- Messages will be dynamically loaded here -->
+                            </ul>
+                            <form id="community-form" class="flex items-center space-x-2">
+                                <input type="text" name="message" placeholder="Send a message..."
+                                    class="flex-grow px-4 py-2 rounded-full bg-gray-600 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500">
+                                <button type="submit"
+                                    class="p-2 bg-teal-500 text-white rounded-full shadow-lg hover:bg-teal-400 transition-colors duration-300">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none"
+                                        viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                                    </svg>
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </template>
+
+    <!-- New templates for login and signup -->
+    <template id="login-template">
+        <section class="py-20 px-4 min-h-screen flex items-center justify-center">
+            <div class="bg-gray-800 p-8 rounded-xl shadow-lg max-w-md w-full text-center">
+                <h2 class="text-3xl font-bold text-white mb-6">Log In</h2>
+                <form id="login-form" class="space-y-6">
+                    <div>
+                        <input type="email" id="email" name="email" placeholder="Email Address"
+                            class="w-full px-4 py-3 rounded-lg bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500">
+                    </div>
+                    <div>
+                        <input type="password" id="password" name="password" placeholder="Password"
+                            class="w-full px-4 py-3 rounded-lg bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500">
+                    </div>
+                    <button type="submit"
+                        class="w-full px-6 py-4 bg-teal-500 text-white font-bold rounded-full shadow-lg hover:bg-teal-400 transition-colors duration-300">
+                        Log In
+                    </button>
+                </form>
+                <p class="mt-6 text-gray-400">
+                    Don't have an account? <a href="#" onclick="renderView('signup')" class="text-teal-400 hover:underline">Sign Up</a>
+                </p>
+            </div>
+        </section>
+    </template>
+
+    <template id="signup-template">
+        <section class="py-20 px-4 min-h-screen flex items-center justify-center">
+            <div class="bg-gray-800 p-8 rounded-xl shadow-lg max-w-md w-full text-center">
+                <h2 class="text-3xl font-bold text-white mb-6">Sign Up</h2>
+                <form id="signup-form" class="space-y-6">
+                    <div>
+                        <input type="email" id="email" name="email" placeholder="Email Address"
+                            class="w-full px-4 py-3 rounded-lg bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500">
+                    </div>
+                    <div>
+                        <input type="password" id="password" name="password" placeholder="Password"
+                            class="w-full px-4 py-3 rounded-lg bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500">
+                    </div>
+                    <button type="submit"
+                        class="w-full px-6 py-4 bg-teal-500 text-white font-bold rounded-full shadow-lg hover:bg-teal-400 transition-colors duration-300">
+                        Create Account
+                    </button>
+                </form>
+                <p class="mt-6 text-gray-400">
+                    Already have an account? <a href="#" onclick="renderView('login')" class="text-teal-400 hover:underline">Log In</a>
+                </p>
+            </div>
+        </section>
+    </template>
+</body>
+
+</html>
