@@ -48,7 +48,6 @@
         } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-firestore.js";
 
         // Firebase Global Variables
-        const appId = "1:1013327226199:web:b10aa59075978cec43ca12";
         const firebaseConfig = {
             apiKey: "AIzaSyCvxb4a3cwk8Din-Lhh0YGtqJ40ked3r7E",
             authDomain: "gym-website-446d1.firebaseapp.com",
@@ -57,7 +56,8 @@
             messagingSenderId: "1013327226199",
             appId: "1:1013327226199:web:b10aa59075978cec43ca12"
         };
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        const appId = firebaseConfig.appId;
+        
         let db;
         let auth;
         let userId = null;
